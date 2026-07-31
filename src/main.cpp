@@ -26,6 +26,7 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
+    //Create main window
     GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, TITLE, nullptr, nullptr);
     if (window == nullptr) {
         std::fprintf(stderr, "Failed to create GLFW window\n");
@@ -43,7 +44,7 @@ int main() {
         glfwTerminate();
         return EXIT_FAILURE;
     }
-
+    //Set color of window's background
     glClearColor(0.1f, 0.1f, 0.12f, 1.0f);
 
     while (!glfwWindowShouldClose(window)) {
@@ -56,7 +57,7 @@ int main() {
             glfwSetWindowShouldClose(window, GLFW_TRUE);
         }
     }
-
+    //Close window
     glfwDestroyWindow(window);
     glfwTerminate();
     return EXIT_SUCCESS;
