@@ -42,13 +42,22 @@ rigid surface.
 GLFW window opens, clears, `ESC` quits. CMake project with
 `glfw glew glm eigen OpenGL`.
 
-### M2 — Render pipeline + test infrastructure
-- `render/shader.{h,cpp}`: GLSL compile/link helper, loads from `shaders/`
-- `render/mesh.{h,cpp}`: VAO/VBO wrapper over positions + triangle indices
-- `render/camera.{h,cpp}`: 2D orthographic pan/zoom
-- Extract window/loop from `main.cpp` into `core/app.{h,cpp}`
-- Draw a triangle grid (future FEM mesh), wireframe + shaded
-- Test scaffold: CMake library split + CTest + trivial Catch2 test
+### M2 — Render pipeline + test infrastructure (DONE)
+- [x] `render/shader.{h,cpp}`: GLSL compile/link helper, loads from `shaders/`
+- [x] `render/mesh.{h,cpp}`: VAO/VBO wrapper over positions + triangle indices
+  (attribute 0 = `vec2` position; filled + wireframe draws)
+- [x] `render/camera.{h,cpp}`: 2D orthographic pan/zoom; `screenToWorld` maps
+  pixels → world (Y-up world, Y-down pixels)
+- [x] Extract window/loop from `main.cpp` into `core/app.{h,cpp}`
+  (`main.cpp` is now a thin entrypoint; `core` links GLFW/GLEW/OpenGL and owns
+  the GL context)
+- [x] Draw a triangle grid (24×24 cells) filled + wireframe; left-drag pans,
+  scroll zooms, `ESC` quits
+- [x] Test scaffold: CMake library split + CTest + trivial Catch2 test
+- Shaders live in `shaders/grid.{vert,frag}`: `uViewProj` + flat `uColor`
+  (M4 will swap flat colour for per-vertex stress/colour maps)
+- GL objects are destroyed while the context is current (`core::App::cleanup`)
+- Demo grid is built in `core/app.cpp`; M3 replaces it with `sim::Mesh` output
 
 ### M3 — Kinematics (`sim/`)
 - `sim/mesh.{h,cpp}`: nodes + triangle elements, subdivided rectangle generator
@@ -117,7 +126,7 @@ ctest --test-dir build --output-on-failure
 ## Status
 
 - [x] M1 toolchain scaffold
-- [ ] M2 render pipeline + test infrastructure
+- [x] M2 render pipeline + test infrastructure
 - [ ] M3 kinematics
 - [ ] M4 constitutive
 - [ ] M5 nonlinear FEM solve

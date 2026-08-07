@@ -33,28 +33,37 @@ command line".
 - `math` (INTERFACE): header-only GLM wrappers; carries the `src` include path.
 - `sim` (STATIC): continuum mechanics (mesh, F, strain, stress, FEM, contact).
   Links `math`, `Eigen3::Eigen`.
-- `render` (STATIC): OpenGL (shaders, meshes, camera). Links `math`, `glm::glm`.
-- `continuum2d`: the app. Links `render` + `sim` + OpenGL/GLFW/GLEW.
+- `render` (STATIC): OpenGL (shaders, meshes, camera). Links `math`, `glm::glm`,
+  `GLEW::GLEW`.
+- `core` (STATIC): window, input, main loop. Links `render` + OpenGL/GLFW/GLEW;
+  owns the GL context.
+- `continuum2d`: the app. Links `core`.
 - `sim_tests`: Catch2 tests. Links `sim` + `math` + `Catch2::Catch2WithMain`
   ONLY — headless, no OpenGL/GLFW, so tests run without a display.
 
 ## Architecture
 
-- `src/main.cpp` is the only non-trivial source so far. Engine loop lives here
-  until the core/ module is extracted (M2).
-- `sim/` (physics: deformation gradient, strain, stress, FEM, contact) and
-  `render/` (OpenGL: shaders, VAO/VBO) must NOT include each other. `sim`
-  produces node positions + triangle topology; `render` only draws them.
+- `src/main.cpp` is a thin entrypoint; the loop lives in `core/app.{h,cpp}`
+  (owns the window + GL context, drives render + sim).
+- `sim/` (physics: mesh, deformation gradient, strain, stress, FEM, contact)
+  and `render/` (OpenGL: shaders, VAO/VBO, camera) must NOT include each
+  other. `sim` produces node positions + triangle topology; `render` only
+  draws them.
 - `math/` wraps GLM (GLSL-compatible). `shaders/` holds GLSL files.
 - `src` is on the include path, so headers are included as `render/foo.h`,
   `sim/bar.h`, not relative paths.
 - Sim uses a force-based residual formulation (`R = f_int - f_ext - f_c`) so
   dynamics can be added later; see `PLAN.md`.
+- GL objects (Shader/Mesh) are destroyed while the GL context is current
+  (`core::App::cleanup` resets them before the window is torn down).
+- Shader paths in `core/app.cpp` are relative to the working directory — run
+  the binary from the repo root.
 
 ## Current state
 
-Milestone 1 only: GLFW window opens, clears to dark grey, `ESC` quits. Test
-infrastructure is wired (CTest + one trivial Catch2 test). No shaders, meshes,
-or sim code yet. `src/sim/sim.cpp` and `src/render/render.cpp` are zero-byte
-placeholders required by CMake — replace them as modules land. Empty dirs
-(`core/`, `math/`, `shaders/`) are intentional placeholders.
+Milestone 2: GLFW window with a 24×24 triangle grid drawn filled + wireframe;
+left-drag pans, scroll zooms, `ESC` quits. Test infrastructure wired (CTest +
+Catch2). No sim code yet — `src/sim/sim.cpp` is a zero-byte placeholder
+required by CMake; replace it as the module lands. The demo grid is built in
+`core/app.cpp`; M3 will feed `render::Mesh` from `sim::Mesh`. Empty dirs
+(`math/`) are intentional placeholders.

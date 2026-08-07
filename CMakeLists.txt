@@ -27,18 +27,22 @@ target_link_libraries(sim PUBLIC math Eigen3::Eigen)
 target_compile_options(sim PRIVATE -Wall -Wextra)
 
 # OpenGL rendering: shaders, meshes, camera. Must never include sim/.
-add_library(render STATIC src/render/render.cpp)
-target_link_libraries(render PUBLIC math glm::glm)
+add_library(render STATIC
+  src/render/shader.cpp
+  src/render/mesh.cpp
+  src/render/camera.cpp
+)
+target_link_libraries(render PUBLIC math glm::glm GLEW::GLEW)
 target_compile_options(render PRIVATE -Wall -Wextra)
 
+# Application shell: window, input, main loop. Owns the window and the GL
+# context (hence GLFW/GLEW/OpenGL); glues render + sim together.
+add_library(core STATIC src/core/app.cpp)
+target_link_libraries(core PUBLIC render OpenGL::GL glfw GLEW::GLEW)
+target_compile_options(core PRIVATE -Wall -Wextra)
+
 add_executable(continuum2d src/main.cpp)
-target_link_libraries(continuum2d PRIVATE
-  render
-  sim
-  OpenGL::GL
-  glfw
-  GLEW::GLEW
-)
+target_link_libraries(continuum2d PRIVATE core)
 target_compile_options(continuum2d PRIVATE -Wall -Wextra)
 
 # Headless tests: sim + math only, never render/GLFW/GLEW.
