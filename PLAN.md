@@ -257,16 +257,69 @@ src/
 
 ## Implementation phases
 
-| Phase | Tasks | Deliverable |
-| --- | --- | --- |
-| 1. ImGui setup | Add deps, `ImGuiLayer`, wire into `App::init`/`run` | Working ImGui context |
-| 2. State machine | `AppState` enum, dispatch in `run`, stub handlers | Clean transitions |
-| 3. Project model | `project.{h,cpp}`, JSON save/load, scan projects | Persistence works |
-| 4. Main menu | Project browser, New Project, Settings buttons | Usable menu |
-| 5. Project create | Mesh/material form, validate, Create & Run | New projects configured |
-| 6. Simulation view | Menu bar, side panel, save/exit | Save + load working |
-| 7. Settings | Directory, rendering prefs, persistence | App preferences |
-| 8. Polish | Theme, shortcuts, error handling | Production-ready |
+| Phase | Tasks | Deliverable | Status |
+| --- | --- | --- | --- |
+| 1. ImGui setup | Add deps, `ImGuiLayer`, wire into `App::init`/`run` | Working ImGui context | DONE |
+| 2. State machine | `AppState` enum, dispatch in `run`, stub handlers | Clean transitions | DONE |
+| 3. Project model | `project.{h,cpp}`, JSON save/load, scan projects | Persistence works | pending |
+| 4. Main menu | Project browser, New Project, Settings buttons | Usable menu | pending |
+| 5. Project create | Mesh/material form, validate, Create & Run | New projects configured | pending |
+| 6. Simulation view | Menu bar, side panel, save/exit | Save + load working | pending |
+| 7. Settings | Directory, rendering prefs, persistence | App preferences | pending |
+| 8. Polish | Theme, shortcuts, error handling | Production-ready | pending |
+
+## GUI progress log
+
+What has actually landed, in implementation order. The physics roadmap above is
+untouched; this tracks only the GUI section's own work.
+
+### Phase 1 — ImGui setup (DONE)
+
+- **Dependencies**: `nlohmann-json3-dev` added to the apt list in `AGENTS.md`;
+  Dear ImGui is *not* an apt dependency. Ubuntu's `libimgui-dev` compiled
+  ImGui 1.90.1 fine, but its GLFW/OpenGL3 backend `.cpp` files live under
+  `/usr/share/doc/` and it needs sudo — awkward and fragile. Instead **ImGui is
+  fetched at configure time via `FetchContent`** (v1.92.9, shallow clone). The
+  upstream repo ships no root `CMakeLists.txt`, so `CMakeLists.txt` builds an
+  `imgui` static target from the core files + GLFW/OpenGL3 backends itself.
+  Needs network on the first `cmake -B build` (already noted in `AGENTS.md`).
+- **`src/core/imgui_layer.{h,cpp}`** (new): owns the ImGui context, initialises
+  the GLFW + OpenGL3 backends (`ImGui_ImplGlfw_InitForOpenGL` +
+  `ImGui_ImplOpenGL3_Init("#version 330")`), and exposes `beginFrame()` /
+  `endFrame()` around each rendered frame. Shutdown runs while the GL context
+  is still current (same rule as the other GL objects in `App`).
+- **`src/core/app.{h,cpp}`**: the layer is created in `App::init()` *after* the
+  GL context is current and *after* App's GLFW callbacks, so ImGui chains onto
+  them. Mouse panning now yields to `ImGui::GetIO().WantCaptureMouse`. The
+  OpenGL3 backend uses its own bundled loader, so no GLEW interaction.
+- Verified: builds clean with `-Wall -Wextra`, `ctest` passes, app runs.
+
+### Phase 2 — State machine (DONE)
+
+- **`enum class AppState`** in `app.h`: `MainMenu`, `ProjectCreate`,
+  `Simulation`, `Settings`, with the transition diagram documented above it.
+- **Dispatch**: `App::update()` runs the handler for the current state each
+  frame; handlers set `m_state` to navigate, taking effect from the next frame.
+  The `run()` loop is now `processInput(); update(); render();` inside the
+  ImGui frame.
+- **Stub screens** (one method per state in `app.cpp`), sharing two helpers in
+  an anonymous namespace (`beginCenteredWindow`, `screenHeader`):
+  - `updateMainMenu`: New Project / Load Project (disabled until the project
+    browser exists) / Settings / Quit.
+  - `updateProjectCreate`: placeholder outline of the Phase-5 fields + Cancel /
+    Create & Run (jumps to Simulation for now).
+  - `updateSimulation`: small info panel over the scene; grid renders only in
+    this state.
+  - `updateSettings`: "Show ImGui demo window" checkbox (development aid) +
+    Back. All other preferences arrive in Phase 7.
+- **Navigation semantics**: `ESC` is edge-triggered (a `m_wasEscPressed`
+  latch means holding ESC does nothing extra) and acts as "back": it returns to
+  the main menu from any screen and quits from the main menu. When ImGui is
+  editing text or has a popup open, ESC is left to ImGui (clear field / close
+  popup). ImGui keyboard nav stays enabled.
+- The old Phase-1 `showImGuiDebugWindow` was removed; the demo window is now
+  reachable from Settings.
+- Verified: builds clean, `ctest` passes, app starts on the menu and runs.
 
 ## Open questions (decision needed before/while building)
 

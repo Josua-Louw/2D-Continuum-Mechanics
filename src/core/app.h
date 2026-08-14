@@ -13,6 +13,23 @@ struct GLFWwindow;
 
 namespace core {
 
+// The GUI is a state machine: the app is always in exactly one screen, and
+// the main loop dispatches to that screen's handler. Transitions happen by
+// changing m_state inside a handler (e.g. on a button press) and take effect
+// the next frame. See PLAN.md "State machine".
+//
+//     MainMenu --New Project--> ProjectCreate --Create & Run--> Simulation
+//         ^                                                            |
+//         |<--------------------------Exit to Menu---------------------|
+//         |                       (also ESC from any screen)
+//         +--Settings--------------------------------------------------+
+enum class AppState {
+    MainMenu,        // Entry point: browse saved projects, start a new one.
+    ProjectCreate,   // Form that configures a new project (mesh + material).
+    Simulation,      // The loaded project's scene, run and edited.
+    Settings,        // Global application preferences.
+};
+
 // Application shell: owns the GLFW window, the OpenGL scene (shader, demo
 // grid, camera), and the main loop. main.cpp only constructs this and calls
 // run(). Keeping the loop here (rather than in main) lets the engine be
@@ -46,6 +63,13 @@ private:
     glm::dvec2 m_lastCursor{0.0, 0.0};
     bool m_dragging = false;
 
+    // Which screen the app is showing; see the AppState enum above.
+    AppState m_state = AppState::MainMenu;
+
+    // The previous frame's ESC state, so ESC is treated as a key press rather
+    // than "held": pressing it once navigates, holding it does nothing extra.
+    bool m_wasEscPressed = false;
+
     bool init();
     void cleanup();
 
@@ -55,12 +79,22 @@ private:
     // Handle keyboard/mouse input for this frame.
     void processInput();
 
-    // Clear the screen and draw the grid (filled then wireframe).
+    // Run the UI handler for the current state, then draw the scene. Called
+    // once per frame between ImGui::NewFrame and ImGui::Render.
+    void update();
+
+    // Draw the scene. Non-simulation screens are pure ImGui (the grid is only
+    // rendered while a simulation is on screen).
     void render();
 
-    // Phase-1 placeholder overlay: proves the ImGui context works until the
-    // state machine and real screens land.
-    void showImGuiDebugWindow();
+    // One ImGui screen per AppState value. Each handler owns its windows for
+    // that frame and may change m_state to navigate away.
+    void updateMainMenu();
+    void updateProjectCreate();
+    void updateSimulation();
+    void updateSettings();
+
+    // True while the ImGui demo browser is shown (toggleable from Settings).
     bool m_showDemoWindow = false;
 
     // GLFW callbacks are free functions; they need access to the App, which

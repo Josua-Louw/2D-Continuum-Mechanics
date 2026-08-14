@@ -22,6 +22,32 @@ constexpr float GRID_HALF_EXTENT = 1.2f;
 void glfwErrorCallback(int code, const char* description) {
     std::fprintf(stderr, "GLFW error %d: %s\n", code, description);
 }
+
+// Flags shared by the full "screen" windows (menu, create, settings): no title
+// bar, fixed position/size, nothing persisted to the ImGui .ini file (so every
+// launch starts from a known layout), and no nav focus stealing.
+constexpr ImGuiWindowFlags SCREEN_FLAGS =
+    ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+    ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+    ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNav;
+
+// Begin a centred, auto-sized window intended to be a whole screen (menu,
+// new-project form, settings). Caller must pair it with ImGui::End().
+// The pivot (0.5, 0.5) in SetNextWindowPos centres the window on the display.
+void beginCenteredWindow(const char* title) {
+    const ImVec2 display = ImGui::GetIO().DisplaySize;
+    ImGui::SetNextWindowPos(ImVec2(display.x * 0.5f, display.y * 0.5f),
+                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::Begin(title, nullptr, SCREEN_FLAGS);
+}
+
+// Standard header for the screen windows: app title + one-line description.
+void screenHeader(const char* subtitle) {
+    ImGui::TextUnformatted("2D Continuum Mechanics");
+    ImGui::TextDisabled("%s", subtitle);
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0f, 10.0f));
+}
 }  // namespace
 
 App::App() = default;
@@ -144,8 +170,34 @@ void App::buildGrid() {
 }
 
 void App::processInput() {
-    if (glfwGetKey(m_window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-        glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+    // --- ESC navigation -----------------------------------------------------
+    // ESC acts as "back": it quits from the main menu and returns to the menu
+    // from anywhere else. It is edge-triggered (fires on the press, not while
+    // held) so holding ESC never navigates twice. When ImGui is editing text
+    // or has a popup open, ESC belongs to ImGui instead (clear field / close
+    // popup) and we leave it alone.
+    const bool escPressed = glfwGetKey(m_window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
+    const bool imguiWantsEsc =
+        ImGui::IsPopupOpen(nullptr,
+                           ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) ||
+        ImGui::GetIO().WantTextInput;
+    if (escPressed && !m_wasEscPressed && !imguiWantsEsc) {
+        if (m_state == AppState::MainMenu) {
+            glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+        } else {
+            m_state = AppState::MainMenu;
+        }
+    }
+    m_wasEscPressed = escPressed;
+
+    // --- Mouse panning -----------------------------------------------------
+    // Panning only makes sense while the scene is visible (Simulation state),
+    // and ImGui wants the mouse whenever it hovers or drags a widget, so hand
+    // it over in those cases too.
+    if (m_state != AppState::Simulation ||
+        (m_imgui != nullptr && ImGui::GetIO().WantCaptureMouse)) {
+        m_dragging = false;
+        return;
     }
 
     // Left-drag pans the view: the world points under the cursor before and
@@ -156,14 +208,6 @@ void App::processInput() {
     double y = 0.0;
     glfwGetCursorPos(m_window, &x, &y);
     const glm::vec2 cursor(static_cast<float>(x), static_cast<float>(y));
-
-    // When ImGui wants the mouse (hovering/dragging a widget), hand over the
-    // panning so interacting with the UI doesn't also shift the camera.
-    if (m_imgui != nullptr && ImGui::GetIO().WantCaptureMouse) {
-        m_dragging = false;
-        m_lastCursor = glm::dvec2(cursor);
-        return;
-    }
 
     if (pressed) {
         if (m_dragging) {
@@ -182,8 +226,26 @@ void App::processInput() {
     m_lastCursor = glm::dvec2(cursor);
 }
 
+void App::update() {
+    // Dispatch to the handler for the current screen. A handler may change
+    // m_state (navigation); the new screen takes over from the next frame.
+    switch (m_state) {
+        case AppState::MainMenu:      updateMainMenu();      break;
+        case AppState::ProjectCreate: updateProjectCreate(); break;
+        case AppState::Simulation:    updateSimulation();    break;
+        case AppState::Settings:      updateSettings();      break;
+    }
+}
+
 void App::render() {
     glClear(GL_COLOR_BUFFER_BIT);
+
+    // Only the simulation screen shows the scene. The menu, new-project and
+    // settings screens are pure ImGui, so the plain background is all there is
+    // to draw behind them.
+    if (m_state != AppState::Simulation) {
+        return;
+    }
 
     // Draw the grid twice: a dim filled pass underneath, then a brighter
     // wireframe on top so cell structure stays visible. Both use the same
@@ -198,20 +260,108 @@ void App::render() {
     m_grid->drawWireframe();
 }
 
-void App::showImGuiDebugWindow() {
-    ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(320.0f, 150.0f), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Continuum2D", nullptr)) {
-        ImGui::Text("ImGui v%s", IMGUI_VERSION);
-        ImGui::Text("Frame rate: %.1f FPS (%.3f ms)", ImGui::GetIO().Framerate,
-                    1000.0f / ImGui::GetIO().Framerate);
-        ImGui::Checkbox("Show ImGui demo window", &m_showDemoWindow);
-    }
-    ImGui::End();
+void App::updateMainMenu() {
+    // The main menu is a compact, centred window on a plain background. It is
+    // the app's entry point: start or load a project, tweak settings, quit.
+    beginCenteredWindow("Main Menu");
 
+    screenHeader("Phase 2: state-machine skeleton");
+
+    const ImVec2 buttonSize(240.0f, 40.0f);
+
+    // Start a fresh project: drop into the creation screen (the real form is
+    // built in Phase 5).
+    if (ImGui::Button("New Project", buttonSize)) {
+        m_state = AppState::ProjectCreate;
+    }
+
+    // Browsing/opening saved projects needs the project model (Phase 3) and
+    // the browser UI (Phase 4), so the entry point stays visible but inert.
+    ImGui::BeginDisabled();
+    ImGui::Button("Load Project", buttonSize);
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Saved projects will be listed here (Phase 4).");
+    }
+
+    if (ImGui::Button("Settings", buttonSize)) {
+        m_state = AppState::Settings;
+    }
+
+    if (ImGui::Button("Quit", buttonSize)) {
+        glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+    }
+
+    ImGui::End();
+}
+
+void App::updateProjectCreate() {
+    beginCenteredWindow("New Project");
+
+    screenHeader("Phase 2: skeleton - form fields arrive in Phase 5.");
+
+    // Placeholder outline of the fields the creation form will edit once the
+    // Project model (Phase 3) exists. Showing them keeps the layout obvious.
+    ImGui::BulletText("Project name");
+    ImGui::BulletText("Mesh: cells per side, world size");
+    ImGui::BulletText("Material: shear / bulk modulus, density");
+
+    ImGui::Dummy(ImVec2(0.0f, 12.0f));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+
+    const ImVec2 buttonSize(140.0f, 36.0f);
+    if (ImGui::Button("Cancel", buttonSize)) {
+        m_state = AppState::MainMenu;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Create & Run", buttonSize)) {
+        // Phase 5: validate the form, build the sim mesh, then enter the
+        // simulation screen. For now it jumps straight to the simulation view.
+        m_state = AppState::Simulation;
+    }
+
+    ImGui::End();
+}
+
+void App::updateSimulation() {
+    // The scene fills the window behind ImGui. This small overlay reports the
+    // state while the full project view (menus, tools, save/load) is designed
+    // together with the sim module.
+    ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(320.0f, 140.0f), ImGuiCond_FirstUseEver);
+    ImGui::Begin("Simulation");
+    ImGui::TextDisabled("Phase 2: project view is a stub.");
+    ImGui::Text("Left-drag pans, scroll zooms, ESC returns to menu.");
+    ImGui::Separator();
+    ImGui::Text("ImGui v%s", IMGUI_VERSION);
+    ImGui::Text("FPS: %.1f (%.2f ms)", ImGui::GetIO().Framerate,
+                1000.0f / ImGui::GetIO().Framerate);
+    ImGui::End();
+}
+
+void App::updateSettings() {
+    beginCenteredWindow("Settings");
+
+    screenHeader("Phase 2: skeleton - preferences land in Phase 7.");
+
+    // Handy while developing: toggle the full ImGui demo browser, which shows
+    // every widget and lets us test interactions without writing a UI first.
+    ImGui::Checkbox("Show ImGui demo window", &m_showDemoWindow);
     if (m_showDemoWindow) {
         ImGui::ShowDemoWindow(&m_showDemoWindow);
     }
+
+    ImGui::Dummy(ImVec2(0.0f, 12.0f));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+
+    const ImVec2 buttonSize(140.0f, 36.0f);
+    if (ImGui::Button("Back", buttonSize)) {
+        m_state = AppState::MainMenu;
+    }
+
+    ImGui::End();
 }
 
 void App::onFramebufferResize(GLFWwindow* window, int width, int height) {
@@ -241,8 +391,8 @@ int App::run() {
     while (glfwWindowShouldClose(m_window) == GLFW_FALSE) {
         m_imgui->beginFrame();
         processInput();
+        update();
         render();
-        showImGuiDebugWindow();
         m_imgui->endFrame();
 
         glfwSwapBuffers(m_window);
