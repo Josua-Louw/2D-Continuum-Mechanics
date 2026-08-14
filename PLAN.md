@@ -131,3 +131,149 @@ ctest --test-dir build --output-on-failure
 - [ ] M4 constitutive
 - [ ] M5 nonlinear FEM solve
 - [ ] M6 contact (pressure & shear)
+
+---
+
+# GUI & System Controls (owner: GUI agent)
+
+> This section is maintained by the agent responsible for the menu / project
+> creation / save-load GUI. It lives in its own section so it does not clash
+> with the physics agent's roadmap above. The two roadmap areas cooperate: the
+> GUI drives the `sim` module via serialised `Project` data, while `sim`
+> produces node positions + topology that the GUI's project view renders.
+
+## Scope
+
+A presentation layer on top of the engine that:
+
+- **Menu page**: browse and open past projects, create a new project, reach
+  settings.
+- **Project creation page**: configure everything a simulation needs (mesh +
+  material to begin, extended as sim milestones land).
+- **Project view**: runs the simulation; must support **save** and **load**.
+  The project view's layout/controls will be developed as the sim system is
+  built, guided by the user.
+
+## Locked decisions
+
+| Decision | Choice | Why |
+| --- | --- | --- |
+| GUI library | Dear ImGui (GLFW + OpenGL3 backend) | Standard for OpenGL tools, immediate mode, easy to iterate |
+| Project data scope | Minimal: mesh config + material config for now | Expand after M3–M6 add BCs / solver / contact fields |
+| App integration | State machine, replaces flat render loop | Clean separation of Menu / Create / Simulation / Settings |
+| Serialization | nlohmann/json (header-only) | Human-readable, versionable, easy migration |
+| Save file format | `.json` per project | Keeps projects inspectable and future-proof |
+
+## Architecture rules
+
+- The GUI lives in `core/` (window + GL context owner). It never reaches into
+  `sim/` internals; it hands `sim` serialised project data and renders what
+  `sim` produces. The existing rule "`render/` never includes `sim/`" still
+  holds — GUI state and drawing sit one layer above both.
+- Project data (`core/project.h`) is pure data with zero `sim`/`render`
+  dependencies, kept serialisable so it can grow independently of physics.
+
+## State machine
+
+```
+MainMenu ──New Project──▶ ProjectCreate ──Create & Run──▶ Simulation
+    ▲                                                            │
+    │──────────────Load Project────────────────────────────────┘
+    │                                                           │
+    └──Settings──MainMenu  ◀────Exit to Menu────────────────────┘
+```
+
+`core::App` owns the current `AppState` and dispatches to a handler per state
+in the main loop. `ESC` from Simulation returns to the menu.
+
+## Project data model (`src/core/project.h/cpp`)
+
+```cpp
+struct MeshConfig {
+    int gridCells = 24;    // subdivisions per side
+    float halfExtent = 1.2f;   // world half-size
+};
+
+struct MaterialConfig {
+    float shearModulus = 1000.0f;   // μ, Neo-Hookean
+    float bulkModulus  = 2000.0f;   // λ, compressible Neo-Hookean
+    float density      = 1000.0f;   // ρ, for future dynamics
+};
+
+struct Project {
+    std::string name;
+    std::string createdAt;
+    std::string modifiedAt;
+    MeshConfig mesh;
+    MaterialConfig material;
+    // future: boundary conditions, solver params, contact settings
+    nlohmann::json toJson() const;
+    static Project fromJson(const nlohmann::json&);
+};
+
+struct ProjectInfo {          // for the menu's project browser
+    std::string name;
+    std::filesystem::path path;
+    std::string lastModified;
+};
+```
+
+## ImGui integration (`src/core/imgui_layer.h/cpp`)
+
+```cpp
+class ImGuiLayer {
+public:
+    ImGuiLayer(GLFWwindow* window);
+    ~ImGuiLayer();
+    void beginFrame();  // NewFrame() for both backends
+    void endFrame();    // ImGui::Render + RenderDrawData
+};
+```
+
+Initialised in `App::init()` (context + GLFW/OpenGL3 backends, dark style).
+The main loop becomes:
+
+```
+processInput();          // ESC / state transitions
+updateCurrentState();    // dispatch to handler
+render();                // existing simulation draw
+ImGui::Render();         // GUI on top
+glfwSwapBuffers; glfwPollEvents;
+```
+
+## File structure
+
+```
+src/
+├── core/
+│   ├── app.{h,cpp}           # state machine, ImGui layer, project I/O
+│   ├── project.{h,cpp}       # project data model + JSON save/load
+│   ├── imgui_layer.{h,cpp}   # ImGui init / render wrapper
+│   └── (optional) file_dialog → ImGuiFileDialog (header-only)
+├── render/                   # unchanged
+├── sim/                      # unchanged (driven by project data)
+└── main.cpp                  # unchanged
+```
+
+## Implementation phases
+
+| Phase | Tasks | Deliverable |
+| --- | --- | --- |
+| 1. ImGui setup | Add deps, `ImGuiLayer`, wire into `App::init`/`run` | Working ImGui context |
+| 2. State machine | `AppState` enum, dispatch in `run`, stub handlers | Clean transitions |
+| 3. Project model | `project.{h,cpp}`, JSON save/load, scan projects | Persistence works |
+| 4. Main menu | Project browser, New Project, Settings buttons | Usable menu |
+| 5. Project create | Mesh/material form, validate, Create & Run | New projects configured |
+| 6. Simulation view | Menu bar, side panel, save/exit | Save + load working |
+| 7. Settings | Directory, rendering prefs, persistence | App preferences |
+| 8. Polish | Theme, shortcuts, error handling | Production-ready |
+
+## Open questions (decision needed before/while building)
+
+1. File dialog: use ImGuiFileDialog (header-only, cross-platform) vs hardcoded
+   paths for MVP.
+2. Projects directory: `./projects/` next to the binary vs platform standard
+   (`~/.local/share/continuum2d/projects/`).
+3. Auto-save on simulation exit, or manual save only.
+4. Theme: ImGui Dark vs custom palette matching the simulation.
+5. Settings persistence: remember window size, last project, theme.
