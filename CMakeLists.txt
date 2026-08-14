@@ -14,6 +14,38 @@ find_package(GLEW REQUIRED)
 find_package(glm REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(Catch2 REQUIRED)
+find_package(nlohmann_json REQUIRED)
+
+include(FetchContent)
+
+# Dear ImGui: fetched from GitHub (no apt package is used). The upstream repo
+# ships no CMakeLists.txt, so after FetchContent populates the sources we build
+# the core library and the GLFW + OpenGL3 backends into an `imgui` target.
+# Requires network access on the first configure.
+FetchContent_Declare(
+  imgui
+  GIT_REPOSITORY https://github.com/ocornut/imgui.git
+  GIT_TAG v1.92.9
+  GIT_SHALLOW TRUE
+)
+FetchContent_GetProperties(imgui)
+if(NOT imgui_POPULATED)
+  FetchContent_Populate(imgui)
+  add_library(imgui STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/imgui_demo.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+  )
+  target_include_directories(imgui PUBLIC
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+  )
+  target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
+endif()
 
 # Header-only math wrappers (GLSL-compatible GLM helpers). Carries the `src`
 # include path to every target.
@@ -35,10 +67,10 @@ add_library(render STATIC
 target_link_libraries(render PUBLIC math glm::glm GLEW::GLEW)
 target_compile_options(render PRIVATE -Wall -Wextra)
 
-# Application shell: window, input, main loop. Owns the window and the GL
+# Application shell: window, input, main loop, GUI. Owns the window and the GL
 # context (hence GLFW/GLEW/OpenGL); glues render + sim together.
-add_library(core STATIC src/core/app.cpp)
-target_link_libraries(core PUBLIC render OpenGL::GL glfw GLEW::GLEW)
+add_library(core STATIC src/core/app.cpp src/core/imgui_layer.cpp)
+target_link_libraries(core PUBLIC render OpenGL::GL glfw GLEW::GLEW imgui)
 target_compile_options(core PRIVATE -Wall -Wextra)
 
 add_executable(continuum2d src/main.cpp)

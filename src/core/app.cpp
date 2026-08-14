@@ -2,6 +2,7 @@
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+#include <imgui.h>
 
 #include <cstdio>
 
@@ -78,6 +79,13 @@ bool App::init() {
     glfwSetFramebufferSizeCallback(m_window, &App::onFramebufferResize);
     glfwSetScrollCallback(m_window, &App::onScroll);
 
+    // ImGui must initialise after the GL context is current (and after App's
+    // callbacks are registered, so its own callbacks chain onto them).
+    m_imgui = std::make_unique<ImGuiLayer>(m_window);
+    if (!m_imgui->init()) {
+        return false;
+    }
+
     m_camera.setViewport(static_cast<float>(m_width), static_cast<float>(m_height));
     glClearColor(0.1f, 0.1f, 0.12f, 1.0f);
 
@@ -85,8 +93,12 @@ bool App::init() {
 }
 
 void App::cleanup() {
-    // Order matters: the mesh and shader own GL objects, so they must be
-    // destroyed while the context is still current, before the window goes.
+    // Order matters: the mesh, shader and ImGui backends own GL resources, so
+    // they must be released while the context is still current, before the
+    // window goes.
+    if (m_imgui != nullptr) {
+        m_imgui.reset();
+    }
     if (m_shader != nullptr) {
         m_shader.reset();
     }
@@ -145,6 +157,14 @@ void App::processInput() {
     glfwGetCursorPos(m_window, &x, &y);
     const glm::vec2 cursor(static_cast<float>(x), static_cast<float>(y));
 
+    // When ImGui wants the mouse (hovering/dragging a widget), hand over the
+    // panning so interacting with the UI doesn't also shift the camera.
+    if (m_imgui != nullptr && ImGui::GetIO().WantCaptureMouse) {
+        m_dragging = false;
+        m_lastCursor = glm::dvec2(cursor);
+        return;
+    }
+
     if (pressed) {
         if (m_dragging) {
             const glm::vec2 currentWorld = m_camera.screenToWorld(cursor, m_width, m_height);
@@ -178,6 +198,22 @@ void App::render() {
     m_grid->drawWireframe();
 }
 
+void App::showImGuiDebugWindow() {
+    ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(320.0f, 150.0f), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Continuum2D", nullptr)) {
+        ImGui::Text("ImGui v%s", IMGUI_VERSION);
+        ImGui::Text("Frame rate: %.1f FPS (%.3f ms)", ImGui::GetIO().Framerate,
+                    1000.0f / ImGui::GetIO().Framerate);
+        ImGui::Checkbox("Show ImGui demo window", &m_showDemoWindow);
+    }
+    ImGui::End();
+
+    if (m_showDemoWindow) {
+        ImGui::ShowDemoWindow(&m_showDemoWindow);
+    }
+}
+
 void App::onFramebufferResize(GLFWwindow* window, int width, int height) {
     // Called by GLFW whenever the window is resized; keep the GL viewport and
     // the camera's aspect ratio in sync with the new framebuffer size.
@@ -203,8 +239,11 @@ int App::run() {
     }
 
     while (glfwWindowShouldClose(m_window) == GLFW_FALSE) {
+        m_imgui->beginFrame();
         processInput();
         render();
+        showImGuiDebugWindow();
+        m_imgui->endFrame();
 
         glfwSwapBuffers(m_window);
         glfwPollEvents();

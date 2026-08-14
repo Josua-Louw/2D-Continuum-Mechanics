@@ -4,6 +4,7 @@
 
 #include <memory>
 
+#include <core/imgui_layer.h>
 #include <render/camera.h>
 #include <render/mesh.h>
 #include <render/shader.h>
@@ -38,6 +39,7 @@ private:
     std::unique_ptr<render::Shader> m_shader;
     std::unique_ptr<render::Mesh> m_grid;
     render::Camera m_camera;
+    std::unique_ptr<ImGuiLayer> m_imgui;
 
     // Mouse-pan bookkeeping: the last cursor position (in pixels) and whether
     // the left button is currently held.
@@ -55,6 +57,11 @@ private:
 
     // Clear the screen and draw the grid (filled then wireframe).
     void render();
+
+    // Phase-1 placeholder overlay: proves the ImGui context works until the
+    // state machine and real screens land.
+    void showImGuiDebugWindow();
+    bool m_showDemoWindow = false;
 
     // GLFW callbacks are free functions; they need access to the App, which
     // we recover from the user pointer stored on the window.
