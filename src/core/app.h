@@ -3,8 +3,12 @@
 #include <glm/glm.hpp>
 
 #include <memory>
+#include <optional>
+#include <vector>
+#include <filesystem>
 
 #include <core/imgui_layer.h>
+#include <core/project.h>
 #include <render/camera.h>
 #include <render/mesh.h>
 #include <render/shader.h>
@@ -70,6 +74,18 @@ private:
     // than "held": pressing it once navigates, holding it does nothing extra.
     bool m_wasEscPressed = false;
 
+    // The currently loaded project (none on the menu screen).
+    std::optional<Project> m_currentProject;
+
+    // Cached list of projects in the projects directory (newest first).
+    std::vector<ProjectInfo> m_recentProjects;
+
+    // Where projects are stored. Defaults to ./projects/ next to the binary.
+    std::filesystem::path m_projectsDir;
+
+    // True while the ImGui demo browser is shown (toggleable from Settings).
+    bool m_showDemoWindow = false;
+
     bool init();
     void cleanup();
 
@@ -94,8 +110,11 @@ private:
     void updateSimulation();
     void updateSettings();
 
-    // True while the ImGui demo browser is shown (toggleable from Settings).
-    bool m_showDemoWindow = false;
+    // Project I/O helpers.
+    void scanRecentProjects();
+    bool saveCurrentProject();
+    std::optional<Project> loadProject(const std::filesystem::path& path);
+    void initializeSimulationFromProject(const Project& project);
 
     // GLFW callbacks are free functions; they need access to the App, which
     // we recover from the user pointer stored on the window.

@@ -5,6 +5,9 @@
 #include <imgui.h>
 
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <string>
 
 namespace core {
 
@@ -25,6 +28,13 @@ bool ImGuiLayer::init() {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    // Set the ImGui ini file to a dedicated config directory in the project
+    // root (.continuum2d/imgui.ini) so the repo stays clean and the config
+    // stays with the project.
+    std::filesystem::path iniPath = std::filesystem::current_path() / ".continuum2d" / "imgui.ini";
+    std::filesystem::create_directories(iniPath.parent_path());
+    ImGui::GetIO().IniFilename = iniPath.c_str();
 
     // Install the GLFW platform backend (chaining any callbacks App installed
     // beforehand) and the OpenGL3 renderer backend. The renderer uses its own

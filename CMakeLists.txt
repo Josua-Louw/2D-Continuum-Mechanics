@@ -69,8 +69,12 @@ target_compile_options(render PRIVATE -Wall -Wextra)
 
 # Application shell: window, input, main loop, GUI. Owns the window and the GL
 # context (hence GLFW/GLEW/OpenGL); glues render + sim together.
-add_library(core STATIC src/core/app.cpp src/core/imgui_layer.cpp)
-target_link_libraries(core PUBLIC render OpenGL::GL glfw GLEW::GLEW imgui)
+add_library(core STATIC
+  src/core/app.cpp
+  src/core/imgui_layer.cpp
+  src/core/project.cpp
+)
+target_link_libraries(core PUBLIC render OpenGL::GL glfw GLEW::GLEW imgui nlohmann_json::nlohmann_json)
 target_compile_options(core PRIVATE -Wall -Wextra)
 
 add_executable(continuum2d src/main.cpp)

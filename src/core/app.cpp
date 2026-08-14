@@ -112,6 +112,15 @@ bool App::init() {
         return false;
     }
 
+    // Set up the projects directory (.continuum2d/projects/ in the project root)
+    // and scan for existing projects so the menu can list them.
+    const auto projectRoot = std::filesystem::current_path();
+    const auto dataDir = projectRoot / ".continuum2d";
+    std::filesystem::create_directories(dataDir);
+    m_projectsDir = dataDir / "projects";
+    std::filesystem::create_directories(m_projectsDir);
+    scanRecentProjects();
+
     m_camera.setViewport(static_cast<float>(m_width), static_cast<float>(m_height));
     glClearColor(0.1f, 0.1f, 0.12f, 1.0f);
 
@@ -261,28 +270,61 @@ void App::render() {
 }
 
 void App::updateMainMenu() {
-    // The main menu is a compact, centred window on a plain background. It is
-    // the app's entry point: start or load a project, tweak settings, quit.
+    // The main menu is a centred window with the project browser on the left
+    // and actions on the right. It is the app's entry point.
     beginCenteredWindow("Main Menu");
 
-    screenHeader("Phase 2: state-machine skeleton");
+    screenHeader("Projects");
 
     const ImVec2 buttonSize(240.0f, 40.0f);
 
-    // Start a fresh project: drop into the creation screen (the real form is
-    // built in Phase 5).
+    // New project action.
     if (ImGui::Button("New Project", buttonSize)) {
         m_state = AppState::ProjectCreate;
     }
 
-    // Browsing/opening saved projects needs the project model (Phase 3) and
-    // the browser UI (Phase 4), so the entry point stays visible but inert.
-    ImGui::BeginDisabled();
-    ImGui::Button("Load Project", buttonSize);
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("Saved projects will be listed here (Phase 4).");
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+
+    ImGui::Text("Recent Projects");
+
+    // List saved projects with Load / Delete buttons.
+    if (m_recentProjects.empty()) {
+        ImGui::TextDisabled("No saved projects yet.");
+    } else {
+        for (auto& info : m_recentProjects) {
+            ImGui::PushID(info.path.string().c_str());
+            ImGui::TextUnformatted(info.name.c_str());
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", info.lastModified.c_str());
+
+            // Load button
+            if (ImGui::Button("Load", ImVec2(60.0f, 24.0f))) {
+                if (auto loaded = loadProject(info.path)) {
+                    m_currentProject = std::move(loaded);
+                    initializeSimulationFromProject(*m_currentProject);
+                    m_state = AppState::Simulation;
+                }
+            }
+            ImGui::SameLine();
+
+            // Delete button
+            if (ImGui::Button("Delete", ImVec2(60.0f, 24.0f))) {
+                std::error_code ec;
+                std::filesystem::remove(info.path, ec);
+                if (!ec) {
+                    scanRecentProjects();
+                }
+            }
+            ImGui::PopID();
+            ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        }
     }
+
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
 
     if (ImGui::Button("Settings", buttonSize)) {
         m_state = AppState::Settings;
@@ -298,13 +340,35 @@ void App::updateMainMenu() {
 void App::updateProjectCreate() {
     beginCenteredWindow("New Project");
 
-    screenHeader("Phase 2: skeleton - form fields arrive in Phase 5.");
+    screenHeader("Configure a new simulation project");
 
-    // Placeholder outline of the fields the creation form will edit once the
-    // Project model (Phase 3) exists. Showing them keeps the layout obvious.
-    ImGui::BulletText("Project name");
-    ImGui::BulletText("Mesh: cells per side, world size");
-    ImGui::BulletText("Material: shear / bulk modulus, density");
+    // Project name
+    static char nameBuf[128] = "Untitled Project";
+    ImGui::InputText("Project Name", nameBuf, IM_ARRAYSIZE(nameBuf));
+
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+
+    // Mesh configuration
+    ImGui::Text("Mesh Configuration");
+    static int gridCells = 24;
+    static float halfExtent = 1.2f;
+    ImGui::SliderInt("Cells per side", &gridCells, 4, 128);
+    ImGui::DragFloat("World half-extent", &halfExtent, 0.01f, 0.1f, 10.0f, "%.2f");
+
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+
+    // Material configuration
+    ImGui::Text("Material (Neo-Hookean)");
+    static float shearModulus = 1000.0f;
+    static float bulkModulus = 2000.0f;
+    static float density = 1000.0f;
+    ImGui::DragFloat("Shear Modulus (μ)", &shearModulus, 10.0f, 1.0f, 1e6f, "%.0f");
+    ImGui::DragFloat("Bulk Modulus (λ/K)", &bulkModulus, 10.0f, 1.0f, 1e6f, "%.0f");
+    ImGui::DragFloat("Density (ρ)", &density, 10.0f, 1.0f, 1e6f, "%.0f");
 
     ImGui::Dummy(ImVec2(0.0f, 12.0f));
     ImGui::Separator();
@@ -316,27 +380,57 @@ void App::updateProjectCreate() {
     }
     ImGui::SameLine();
     if (ImGui::Button("Create & Run", buttonSize)) {
-        // Phase 5: validate the form, build the sim mesh, then enter the
-        // simulation screen. For now it jumps straight to the simulation view.
-        m_state = AppState::Simulation;
+        // Build the project from the form values
+        Project project = Project::createDefault(nameBuf);
+        project.mesh.gridCells = gridCells;
+        project.mesh.halfExtent = halfExtent;
+        project.material.shearModulus = shearModulus;
+        project.material.bulkModulus = bulkModulus;
+        project.material.density = density;
+
+        // Save to disk
+        const auto path = m_projectsDir / (project.name + ".json");
+        if (saveProject(project, path)) {
+            m_currentProject = std::move(project);
+            initializeSimulationFromProject(*m_currentProject);
+            m_state = AppState::Simulation;
+        }
     }
 
     ImGui::End();
 }
 
 void App::updateSimulation() {
-    // The scene fills the window behind ImGui. This small overlay reports the
-    // state while the full project view (menus, tools, save/load) is designed
-    // together with the sim module.
+    // The scene fills the window behind ImGui. A small overlay reports state
+    // and provides quick actions while the full project view is built with sim.
     ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(320.0f, 140.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(320.0f, 180.0f), ImGuiCond_FirstUseEver);
     ImGui::Begin("Simulation");
-    ImGui::TextDisabled("Phase 2: project view is a stub.");
+
+    if (m_currentProject.has_value()) {
+        ImGui::Text("Project: %s", m_currentProject->name.c_str());
+    } else {
+        ImGui::TextDisabled("No project loaded");
+    }
     ImGui::Text("Left-drag pans, scroll zooms, ESC returns to menu.");
     ImGui::Separator();
     ImGui::Text("ImGui v%s", IMGUI_VERSION);
     ImGui::Text("FPS: %.1f (%.2f ms)", ImGui::GetIO().Framerate,
                 1000.0f / ImGui::GetIO().Framerate);
+
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+
+    if (ImGui::Button("Save Project", ImVec2(140.0f, 28.0f))) {
+        saveCurrentProject();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Back to Menu", ImVec2(140.0f, 28.0f))) {
+        m_state = AppState::MainMenu;
+        scanRecentProjects();  // Refresh the project browser
+    }
+
     ImGui::End();
 }
 
@@ -359,9 +453,59 @@ void App::updateSettings() {
     const ImVec2 buttonSize(140.0f, 36.0f);
     if (ImGui::Button("Back", buttonSize)) {
         m_state = AppState::MainMenu;
+        scanRecentProjects();  // Refresh the project browser
     }
 
     ImGui::End();
+}
+
+// Project I/O helpers ---------------------------------------------------------
+
+void App::scanRecentProjects() {
+    m_recentProjects = scanProjects(m_projectsDir);
+}
+
+bool App::saveCurrentProject() {
+    if (!m_currentProject.has_value()) {
+        return false;
+    }
+    m_currentProject->modifiedAt = core::nowIso8601();
+    const auto path = m_projectsDir / (m_currentProject->name + ".json");
+    return saveProject(*m_currentProject, path);
+}
+
+std::optional<Project> App::loadProject(const std::filesystem::path& path) {
+    return core::loadProject(path);
+}
+
+void App::initializeSimulationFromProject(const Project& project) {
+    // Rebuild the grid to match the project's mesh configuration.
+    std::vector<glm::vec2> positions;
+    const float step = 2.0f * project.mesh.halfExtent / project.mesh.gridCells;
+    positions.reserve((project.mesh.gridCells + 1) * (project.mesh.gridCells + 1));
+    for (int j = 0; j <= project.mesh.gridCells; ++j) {
+        for (int i = 0; i <= project.mesh.gridCells; ++i) {
+            positions.emplace_back(-project.mesh.halfExtent + i * step,
+                                   -project.mesh.halfExtent + j * step);
+        }
+    }
+
+    std::vector<unsigned int> indices;
+    indices.reserve(2 * project.mesh.gridCells * project.mesh.gridCells * 3);
+    for (int j = 0; j < project.mesh.gridCells; ++j) {
+        for (int i = 0; i < project.mesh.gridCells; ++i) {
+            const unsigned int bl = static_cast<unsigned int>(j * (project.mesh.gridCells + 1) + i);
+            const unsigned int br = bl + 1;
+            const unsigned int tl = static_cast<unsigned int>((j + 1) * (project.mesh.gridCells + 1) + i);
+            const unsigned int tr = tl + 1;
+            indices.insert(indices.end(), {bl, br, tl, br, tr, tl});
+        }
+    }
+
+    m_grid->setVertices(std::move(positions));
+    m_grid->setTriangles(std::move(indices));
+    m_camera.setCenter({0.0f, 0.0f});
+    m_camera.zoom(1.0f);
 }
 
 void App::onFramebufferResize(GLFWwindow* window, int width, int height) {

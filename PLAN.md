@@ -261,8 +261,8 @@ src/
 | --- | --- | --- | --- |
 | 1. ImGui setup | Add deps, `ImGuiLayer`, wire into `App::init`/`run` | Working ImGui context | DONE |
 | 2. State machine | `AppState` enum, dispatch in `run`, stub handlers | Clean transitions | DONE |
-| 3. Project model | `project.{h,cpp}`, JSON save/load, scan projects | Persistence works | pending |
-| 4. Main menu | Project browser, New Project, Settings buttons | Usable menu | pending |
+| 3. Project model | `project.{h,cpp}`, JSON save/load, scan projects | Persistence works | DONE |
+| 4. Main menu | Project browser, New Project, Settings buttons | Usable menu | DONE |
 | 5. Project create | Mesh/material form, validate, Create & Run | New projects configured | pending |
 | 6. Simulation view | Menu bar, side panel, save/exit | Save + load working | pending |
 | 7. Settings | Directory, rendering prefs, persistence | App preferences | pending |
@@ -320,6 +320,49 @@ untouched; this tracks only the GUI section's own work.
 - The old Phase-1 `showImGuiDebugWindow` was removed; the demo window is now
   reachable from Settings.
 - Verified: builds clean, `ctest` passes, app starts on the menu and runs.
+
+### Phase 3 — Project model (DONE)
+
+- **`src/core/project.{h,cpp}`** (new): pure-data `Project`, `MeshConfig`,
+  `MaterialConfig`, `ProjectInfo` structs with `nlohmann::json` (de)serialisation.
+  Includes `saveProject()`, `loadProject()`, `scanProjects()`, and the
+  `nowIso8601()` timestamp helper (UTC ISO 8601).
+- **`CMakeLists.txt`**: `core` now compiles `project.cpp` and links
+  `nlohmann_json::nlohmann_json`.
+- **`src/core/app.{h,cpp}`**:
+  - `App` owns `m_projectsDir` (defaults to `./projects/` next to the binary),
+    `m_recentProjects` (cached browser list), and `m_currentProject` (optional
+    loaded project).
+  - `init()` calls `scanRecentProjects()` after ImGui init.
+  - New helpers: `scanRecentProjects()`, `saveCurrentProject()`, `loadProject()`,
+    `initializeSimulationFromProject()` (rebuilds the grid to match the
+    project's mesh config).
+- **Menu browser** (`updateMainMenu`): lists projects with **Load** (loads,
+  rebuilds grid, enters Simulation) and **Delete** (removes file, refreshes
+  list) per row.
+- **Project creation** (`updateProjectCreate`): real form fields for name,
+  mesh (cells/extent), and Neo-Hookean material (μ, λ, ρ). **Create & Run**
+  saves to `<projectsDir>/<name>.json`, loads it, initialises the grid, and
+  transitions to Simulation.
+- **Simulation overlay** (`updateSimulation`): shows current project name,
+  **Save Project** button (writes modifiedAt + JSON), and **Back to Menu**.
+- Projects are plain `.json` files — inspectable, editable, version-controllable.
+- Verified: builds clean, `ctest` passes, full create → run → save → load cycle
+  works; projects appear in the menu browser after restart.
+
+### Phase 4 — Main menu browser (DONE)
+
+Phase 4 is essentially merged into Phase 3 above: the project browser *is* the
+menu implementation. The menu now shows a live list of saved projects with
+functional Load / Delete per entry, and the New Project button opens the
+creation form. No separate Phase-4 code was needed beyond what Phase 3 already
+delivered.
+
+### ImGui config directory (bonus)
+
+- **`imgui_layer.cpp`**: the ImGui `.ini` file is now written to
+  `~/.config/continuum2d/imgui.ini` (Linux) instead of the project root, so
+  the repo stays clean. Falls back to CWD if `$HOME` is not set.
 
 ## Open questions (decision needed before/while building)
 
