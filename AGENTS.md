@@ -21,12 +21,23 @@ ctest --test-dir build --output-on-failure
 
 ## Dependencies
 
-Ubuntu 24.04 apt: `cmake build-essential libglfw3-dev libglew-dev libglm-dev libeigen3-dev catch2`.
+Ubuntu 24.04 apt: `cmake build-essential libglfw3-dev libglew-dev libglm-dev libeigen3-dev catch2 nlohmann-json3-dev`.
 All found via `find_package` in the root `CMakeLists.txt`. If configure fails,
 the likely cause is a missing dev package (e.g. GLM has no other install path).
 OpenGL must be found explicitly (`find_package(OpenGL REQUIRED)` + link
 `OpenGL::GL`); relying on GLEW alone fails at link time with "DSO missing from
 command line".
+
+ImGui is fetched at configure time via `FetchContent` (vendored, not a system
+package); this requires network access on the first `cmake -B build`.
+
+### Sudo policy
+
+Agents have **no sudo privileges** in this environment and cannot install
+system packages. If a build/runtime step needs a new apt package or any other
+action that requires the user's account (e.g. installing a tool, granting
+permissions, accepting a license), stop and notify the user (the prompter)
+what is needed and why, then wait for confirmation before continuing.
 
 ## Targets
 
@@ -35,8 +46,8 @@ command line".
   Links `math`, `Eigen3::Eigen`.
 - `render` (STATIC): OpenGL (shaders, meshes, camera). Links `math`, `glm::glm`,
   `GLEW::GLEW`.
-- `core` (STATIC): window, input, main loop. Links `render` + OpenGL/GLFW/GLEW;
-  owns the GL context.
+- `core` (STATIC): window, input, main loop, ImGui GUI layer. Links `render` +
+  OpenGL/GLFW/GLEW + `imgui`; owns the GL context.
 - `continuum2d`: the app. Links `core`.
 - `sim_tests`: Catch2 tests. Links `sim` + `math` + `Catch2::Catch2WithMain`
   ONLY — headless, no OpenGL/GLFW, so tests run without a display.
